@@ -1,10 +1,10 @@
 
-# Data Quality App v3 Improved
+# Data Quality App v3.1 Smart
 
-Improvements:
-- Treat phone numbers with or without leading zero as valid
-- Better uniqueness detection for ID-like columns
-- Better completeness detection for important columns
-- Better validity checks for low-cardinality columns
-- Better range check for age-like columns
+Improvements over v3:
+- Validity only on likely categorical columns
+- No validity on ID, phone, or numeric columns
+- Phone without leading zero is valid
+- Better age range logic
+- Reduced false positives
 - Dashboard included
