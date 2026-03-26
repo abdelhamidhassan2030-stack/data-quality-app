@@ -1,10 +1,10 @@
-
 import re
+import json
 import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Data Quality Assessment App v3.1", layout="wide")
+st.set_page_config(page_title="Data Quality App", layout="wide")
 
 st.markdown("""
 <style>
@@ -12,21 +12,56 @@ html, body, [class*="css"] {
     direction: rtl;
     text-align: right;
 }
-.block-container {padding-top: 1rem;}
+.block-container {
+    padding-top: 1rem;
+}
+.metric-card {
+    background: #f8f9fb;
+    border: 1px solid #e6e8ef;
+    padding: 12px 14px;
+    border-radius: 14px;
+    margin-bottom: 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 تطبيق تقييم جودة البيانات - نسخة محسنة v3.1")
-st.caption("فحص تلقائي ذكي + داش بورد + تقليل الإنذارات الخاطئة")
+GENERAL_DIMENSIONS = [
+    "Completeness",
+    "Uniqueness",
+    "Validity",
+    "Accuracy",
+    "Consistency",
+    "Timeliness",
+    "Range",
+    "Format/Pattern",
+]
+
+AR_LABELS = {
+    "Completeness": "الاكتمال",
+    "Uniqueness": "التفرد",
+    "Validity": "الصلاحية",
+    "Accuracy": "الدقة",
+    "Consistency": "الاتساق",
+    "Timeliness": "الحداثة",
+    "Range": "النطاق",
+    "Format/Pattern": "النمط أو الصيغة",
+}
+
+st.title("📊 تطبيق تقييم جودة البيانات")
+st.caption("المعايير العامة ثابتة دائمًا + تقييم تلقائي + تقييم يدوي + داش بورد")
 
 def read_file(uploaded_file):
-    if uploaded_file.name.lower().endswith(".csv"):
+    name = uploaded_file.name.lower()
+    if name.endswith(".csv"):
         return pd.read_csv(uploaded_file)
     xls = pd.ExcelFile(uploaded_file)
     if len(xls.sheet_names) == 1:
         return pd.read_excel(uploaded_file)
     sheet = st.selectbox("اختر الشيت", xls.sheet_names)
     return pd.read_excel(uploaded_file, sheet_name=sheet)
+
+def safe_text(series):
+    return series.fillna("").astype(str).str.strip()
 
 def to_digits(x):
     if pd.isna(x):
@@ -42,59 +77,51 @@ def normalize_phone(x):
         return "0" + d
     return d
 
-def is_valid_phone(x):
-    d = to_digits(x)
-    return d == "" or (len(d) == 11 and d.startswith("0")) or (len(d) == 10 and d.startswith("1"))
-
-def col_matches(col_name, patterns):
-    col = str(col_name).strip().lower()
-    return any(p in col for p in patterns)
-
-def add_issue(issues, row, column, dimension, issue, value, severity="Medium"):
+def add_issue(issues, row, column, dimension, issue, value="", severity="Medium", source="Auto"):
     issues.append({
         "Row": row,
         "Column": column,
         "Dimension": dimension,
         "Issue": issue,
         "Value": value,
-        "Severity": severity
+        "Severity": severity,
+        "Source": source,
     })
 
-def likely_identifier(col_name):
-    c = str(col_name).lower()
-    return any(k in c for k in ["id", "_id", "uuid", "code", "كود", "رقم قومي", "national"])
+def pct(pass_count, total_count):
+    if total_count == 0:
+        return None
+    return round((pass_count / total_count) * 100, 2)
 
-def likely_categorical(col_name, series):
+def is_identifier_name(col_name):
     c = str(col_name).lower()
-    if likely_identifier(col_name):
-        return False
-    # only use validity on true categorical-looking columns
-    name_hint = any(k in c for k in ["gender", "type", "status", "level", "category", "نوع", "حالة", "جنس", "فئة", "تصنيف"])
-    non_null = series.dropna().astype(str).str.strip()
-    nunique = non_null.nunique()
-    ratio = nunique / max(len(non_null), 1)
-    return name_hint or (nunique <= 6 and ratio < 0.2)
+    keys = ["id", "_id", "uuid", "_uuid", "code", "كود", "national", "رقم قومي"]
+    return any(k in c for k in keys)
 
-def detect_column_groups(df):
+def col_matches(col_name, patterns):
+    c = str(col_name).lower()
+    return any(p in c for p in patterns)
+
+def detect_groups(df):
     groups = {
         "phone": [],
         "national_id": [],
         "start": [],
         "end": [],
-        "uuid": [],
+        "id_like": [],
         "categorical": [],
         "numeric": [],
         "required_candidates": [],
-        "age_like": []
+        "age_like": [],
     }
-
     for col in df.columns:
         c = str(col).lower()
+        s = df[col]
 
-        if col_matches(c, ["تليفون", "هاتف", "موبايل", "phone", "mobile"]):
+        if col_matches(c, ["phone", "mobile", "تليفون", "هاتف", "موبايل"]):
             groups["phone"].append(col)
 
-        if col_matches(c, ["رقم قومي", "الرقم القومي", "national id", "national_id", "nid"]):
+        if col_matches(c, ["national id", "national_id", "nid", "رقم قومي", "الرقم القومي"]):
             groups["national_id"].append(col)
 
         if c == "start" or "start" in c or "بداية" in c:
@@ -103,24 +130,27 @@ def detect_column_groups(df):
         if c == "end" or "end" in c or "نهاية" in c:
             groups["end"].append(col)
 
-        if c == "id" or c == "_id" or c == "_uuid" or "uuid" in c:
-            groups["uuid"].append(col)
+        if c in ["id", "_id", "uuid", "_uuid"] or "uuid" in c:
+            groups["id_like"].append(col)
 
         if "age" in c or "عمر" in c:
             groups["age_like"].append(col)
 
-        s = df[col]
         num = pd.to_numeric(s, errors="coerce")
         if num.notna().mean() > 0.8:
             groups["numeric"].append(col)
 
-        if likely_categorical(col, s):
+        non_null = safe_text(s)
+        non_null = non_null[non_null != ""]
+        nunique = non_null.nunique()
+        ratio = nunique / max(len(non_null), 1)
+        name_hint = any(k in c for k in ["gender", "status", "type", "category", "نوع", "حالة", "جنس", "فئة"])
+        if (name_hint or (nunique <= 6 and ratio < 0.2)) and not is_identifier_name(col) and col not in groups["numeric"] and col not in groups["phone"]:
             groups["categorical"].append(col)
 
         if (
-            col_matches(c, ["name", "اسم", "تليفون", "هاتف", "موبايل", "phone", "mobile",
-                            "رقم قومي", "national", "gender", "type", "status", "start", "end"])
-            or (s.notna().mean() > 0.95 and s.astype(str).str.strip().nunique() > 1 and not likely_identifier(col))
+            col_matches(c, ["name", "اسم", "phone", "mobile", "gender", "status", "type", "start", "end", "تليفون", "رقم قومي"])
+            or (s.notna().mean() > 0.95 and non_null.nunique() > 1 and not is_identifier_name(col))
         ):
             groups["required_candidates"].append(col)
 
@@ -129,231 +159,375 @@ def detect_column_groups(df):
     return groups
 
 def auto_assess(df):
+    groups = detect_groups(df)
     issues = []
-    scores = {}
-    groups = detect_column_groups(df)
+    scores = {k: None for k in GENERAL_DIMENSIONS}
 
-    # Completeness
-    checks = 0
-    passed = 0
+    checks = passed = 0
     for col in groups["required_candidates"]:
-        s = df[col]
-        ok = s.notna() & (s.astype(str).str.strip() != "")
+        ok = df[col].notna() & (safe_text(df[col]) != "")
         checks += len(df)
         passed += int(ok.sum())
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Completeness", "قيمة ناقصة في عمود أساسي", "" if pd.isna(df.at[idx, col]) else str(df.at[idx, col]), "High")
-    scores["Completeness"] = round((passed / checks) * 100, 2) if checks else 100.0
+            add_issue(issues, int(idx)+2, col, "Completeness", "Missing value in important column", str(df.at[idx, col]), "High", "Auto")
+    scores["Completeness"] = pct(passed, checks)
 
-    # Uniqueness
-    uniq_scores = []
-    for col in groups["uuid"] + groups["national_id"]:
-        s = df[col].apply(to_digits) if col in groups["national_id"] else df[col].astype(str).str.strip()
-        dup = s.duplicated(keep=False) & (s != "") & (s.str.lower() != "nan")
-        uniq_scores.append(round((~dup).mean() * 100, 2))
+    sub_scores = []
+    for col in groups["id_like"] + groups["national_id"]:
+        vals = df[col].apply(to_digits) if col in groups["national_id"] else safe_text(df[col])
+        dup = vals.duplicated(keep=False) & (vals != "") & (vals.str.lower() != "nan")
+        sub_scores.append(round((~dup).mean() * 100, 2))
         for idx in df.index[dup]:
-            add_issue(issues, int(idx)+2, col, "Uniqueness", "قيمة مكررة في عمود معرف", str(df.at[idx, col]), "High")
-    scores["Uniqueness"] = round(sum(uniq_scores) / len(uniq_scores), 2) if uniq_scores else 100.0
+            add_issue(issues, int(idx)+2, col, "Uniqueness", "Duplicate value in identifier column", str(df.at[idx, col]), "High", "Auto")
+    scores["Uniqueness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Validity only for categorical columns
-    validity_scores = []
+    sub_scores = []
     for col in groups["categorical"]:
-        s = df[col].dropna().astype(str).str.strip()
-        if len(s) < 5:
+        s = safe_text(df[col])
+        s_nonempty = s[s != ""]
+        if len(s_nonempty) < 5:
             continue
-        freq = s.value_counts()
+        freq = s_nonempty.value_counts()
         if len(freq) < 2:
             continue
-
-        # smarter rare-value rule: only if one value is dominant and another is very rare
-        dominant_ratio = freq.iloc[0] / len(s)
-        rare_vals = set(freq[freq == 1].index.tolist())
-        if dominant_ratio >= 0.5 and rare_vals:
-            full = df[col].astype(str).str.strip()
-            ok = ~full.isin(rare_vals) | df[col].isna() | (full == "")
-            validity_scores.append(round(ok.mean() * 100, 2))
+        dominant_ratio = freq.iloc[0] / len(s_nonempty)
+        rare_values = set(freq[freq == 1].index.tolist())
+        if dominant_ratio >= 0.5 and rare_values:
+            ok = ~s.isin(rare_values) | (s == "")
+            sub_scores.append(round(ok.mean() * 100, 2))
             for idx in df.index[~ok]:
-                add_issue(issues, int(idx)+2, col, "Validity", "قيمة نادرة أو غير متسقة محتملة في عمود فئوي", str(df.at[idx, col]), "Medium")
-    scores["Validity"] = round(sum(validity_scores) / len(validity_scores), 2) if validity_scores else 100.0
+                add_issue(issues, int(idx)+2, col, "Validity", "Suspicious rare value in categorical column", str(df.at[idx, col]), "Medium", "Auto")
+    scores["Validity"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Format/Pattern
-    fmt_scores = []
-    for col in groups["phone"]:
-        norm = df[col].apply(normalize_phone)
-        ok = norm.apply(lambda x: x == "" or (len(x) == 11 and x.startswith("0")))
-        fmt_scores.append(round(ok.mean() * 100, 2))
-        for idx in df.index[~ok & (norm != "")]:
-            add_issue(issues, int(idx)+2, col, "Format/Pattern", "رقم تليفون غير صحيح", str(df.at[idx, col]), "High")
+    scores["Accuracy"] = None
 
-    for col in groups["national_id"]:
-        digits = df[col].apply(to_digits)
-        ok = digits.apply(lambda x: x == "" or len(x) == 14)
-        fmt_scores.append(round(ok.mean() * 100, 2))
-        for idx in df.index[~ok & (digits != "")]:
-            add_issue(issues, int(idx)+2, col, "Format/Pattern", "الرقم القومي لا يتكون من 14 رقمًا", str(df.at[idx, col]), "High")
+    cols = list(df.columns)
+    comment_cols = [c for c in cols if col_matches(c, ["comment", "explain", "تعليق", "توضيح", "سبب آخر", "أخرى", "اخري"])]
+    checks = passed = 0
+    for comment_col in comment_cols:
+        idx = cols.index(comment_col)
+        parent = cols[idx-1] if idx > 0 else None
+        if parent:
+            comment_filled = df[comment_col].notna() & (safe_text(df[comment_col]) != "")
+            parent_missing = df[parent].isna() | (safe_text(df[parent]) == "")
+            ok = ~(comment_filled & parent_missing)
+            checks += len(df)
+            passed += int(ok.sum())
+            for i in df.index[~ok]:
+                add_issue(issues, int(i)+2, f"{parent} -> {comment_col}", "Consistency", "Comment filled while parent field is empty", f"{df.at[i, parent]} -> {df.at[i, comment_col]}", "Medium", "Auto")
+    scores["Consistency"] = pct(passed, checks)
 
-    scores["Format/Pattern"] = round(sum(fmt_scores) / len(fmt_scores), 2) if fmt_scores else 100.0
-
-    # Timeliness
-    time_scores = []
+    sub_scores = []
     if groups["start"] and groups["end"]:
-        start_col = groups["start"][0]
-        end_col = groups["end"][0]
-        start_dt = pd.to_datetime(df[start_col], errors="coerce")
-        end_dt = pd.to_datetime(df[end_col], errors="coerce")
-
-        ok = ((end_dt >= start_dt) | start_dt.isna() | end_dt.isna())
-        time_scores.append(round(ok.mean() * 100, 2))
+        s_col = groups["start"][0]
+        e_col = groups["end"][0]
+        s_dt = pd.to_datetime(df[s_col], errors="coerce")
+        e_dt = pd.to_datetime(df[e_col], errors="coerce")
+        ok = (e_dt >= s_dt) | s_dt.isna() | e_dt.isna()
+        sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, f"{start_col} -> {end_col}", "Timeliness", "وقت النهاية أقدم من وقت البداية", f"{df.at[idx, start_col]} -> {df.at[idx, end_col]}", "High")
+            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "End time is before start time", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Auto")
+    scores["Timeliness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-        duration = (end_dt - start_dt).dt.total_seconds() / 60
-        over_30 = duration > 30
-        over_60 = duration > 60
-        for idx in df.index[over_30.fillna(False)]:
-            add_issue(issues, int(idx)+2, f"{start_col} -> {end_col}", "Timeliness", "مدة طويلة تحتاج مراجعة (>30 دقيقة)", round(duration.loc[idx], 2), "Medium")
-        for idx in df.index[over_60.fillna(False)]:
-            add_issue(issues, int(idx)+2, f"{start_col} -> {end_col}", "Timeliness", "مدة شاذة قوية (>60 دقيقة)", round(duration.loc[idx], 2), "High")
-
-    scores["Timeliness"] = round(sum(time_scores) / len(time_scores), 2) if time_scores else 100.0
-
-    # Range
-    range_scores = []
+    sub_scores = []
     for col in groups["numeric"]:
         num = pd.to_numeric(df[col], errors="coerce")
         valid = num.dropna()
         if len(valid) < 5:
             continue
-
         if col in groups["age_like"]:
             ok = num.between(0, 120) | num.isna()
-            range_scores.append(round(ok.mean() * 100, 2))
+            sub_scores.append(round(ok.mean() * 100, 2))
             for idx in df.index[~ok]:
-                add_issue(issues, int(idx)+2, col, "Range", "قيمة العمر خارج النطاق المنطقي [0 - 120]", str(df.at[idx, col]), "High")
+                add_issue(issues, int(idx)+2, col, "Range", "Age is outside logical range [0 - 120]", str(df.at[idx, col]), "High", "Auto")
             continue
-
-        # avoid applying outlier range on identifier-like numeric columns
-        if likely_identifier(col) or col in groups["phone"] or col in groups["national_id"]:
+        if is_identifier_name(col) or col in groups["phone"] or col in groups["national_id"]:
             continue
-
         q1 = valid.quantile(0.25)
         q3 = valid.quantile(0.75)
         iqr = q3 - q1
         if iqr == 0:
             continue
-
         low = q1 - 1.5 * iqr
         high = q3 + 1.5 * iqr
         ok = num.between(low, high) | num.isna()
-        range_scores.append(round(ok.mean() * 100, 2))
+        sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Range", f"قيمة شاذة خارج النطاق الإحصائي التقريبي [{round(low,2)} - {round(high,2)}]", str(df.at[idx, col]), "Medium")
+            add_issue(issues, int(idx)+2, col, "Range", f"Outlier outside estimated range [{round(low,2)} - {round(high,2)}]", str(df.at[idx, col]), "Medium", "Auto")
+    scores["Range"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    scores["Range"] = round(sum(range_scores) / len(range_scores), 2) if range_scores else 100.0
+    sub_scores = []
+    for col in groups["phone"]:
+        norm = df[col].apply(normalize_phone)
+        ok = norm.apply(lambda x: x == "" or (len(x) == 11 and x.startswith("0")))
+        sub_scores.append(round(ok.mean() * 100, 2))
+        for idx in df.index[~ok & (norm != "")]:
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", "Invalid phone format", str(df.at[idx, col]), "High", "Auto")
+    for col in groups["national_id"]:
+        digits = df[col].apply(to_digits)
+        ok = digits.apply(lambda x: x == "" or len(x) == 14)
+        sub_scores.append(round(ok.mean() * 100, 2))
+        for idx in df.index[~ok & (digits != "")]:
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", "National ID must be 14 digits", str(df.at[idx, col]), "High", "Auto")
+    scores["Format/Pattern"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Consistency
-    cols = list(df.columns)
-    comment_cols = [c for c in cols if col_matches(c, ["تعليق", "سبب آخر", "اخري", "أخرى", "توضيح", "explain", "comment"])]
-    checks = 0
-    passed = 0
-    for comment_col in comment_cols:
-        idx_c = cols.index(comment_col)
-        parent_col = cols[idx_c - 1] if idx_c > 0 else None
-        if parent_col:
-            comment_filled = df[comment_col].notna() & (df[comment_col].astype(str).str.strip() != "")
-            parent_missing = df[parent_col].isna() | (df[parent_col].astype(str).str.strip() == "")
-            ok = ~(comment_filled & parent_missing)
-            checks += len(df)
-            passed += int(ok.sum())
-            for idx in df.index[~ok]:
-                add_issue(issues, int(idx)+2, f"{parent_col} -> {comment_col}", "Consistency", "حقل التعليق ممتلئ بينما السؤال السابق فارغ", f"{df.at[idx, parent_col]} -> {df.at[idx, comment_col]}", "Medium")
+    return scores, issues, groups
 
-    scores["Consistency"] = round((passed / checks) * 100, 2) if checks else 100.0
+def default_rules():
+    return {
+        "required_cols": [],
+        "unique_cols": [],
+        "validity_col": "",
+        "allowed_values": "",
+        "accuracy_col": "",
+        "accuracy_reference_values": "",
+        "cons_if_col": "",
+        "cons_if_val": "",
+        "cons_then_col": "",
+        "cons_then_val": "",
+        "time_start_col": "",
+        "time_end_col": "",
+        "range_col": "",
+        "min_val": "",
+        "max_val": "",
+        "format_col": "",
+        "regex_pattern": "",
+    }
 
-    # Accuracy placeholder
-    scores["Accuracy"] = 100.0
+def manual_assess(df, rules):
+    issues = []
+    scores = {k: None for k in GENERAL_DIMENSIONS}
 
-    overall = round(sum(scores.values()) / len(scores), 2) if scores else 100.0
-    scores_df = pd.DataFrame({"المعيار": list(scores.keys()), "النسبة %": list(scores.values())})
-    issues_df = pd.DataFrame(issues).drop_duplicates() if issues else pd.DataFrame(columns=["Row","Column","Dimension","Issue","Value","Severity"])
-    return scores_df, issues_df, overall, groups
+    vals = []
+    for col in rules["required_cols"]:
+        ok = df[col].notna() & (safe_text(df[col]) != "")
+        vals.append(round(ok.mean() * 100, 2))
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, col, "Completeness", "Missing value", str(df.at[idx, col]), "High", "Manual")
+    scores["Completeness"] = round(sum(vals)/len(vals), 2) if vals else None
+
+    vals = []
+    for col in rules["unique_cols"]:
+        s = safe_text(df[col])
+        dup = s.duplicated(keep=False) & (s != "") & (s.str.lower() != "nan")
+        vals.append(round((~dup).mean() * 100, 2))
+        for idx in df.index[dup]:
+            add_issue(issues, int(idx)+2, col, "Uniqueness", "Duplicate value", str(df.at[idx, col]), "High", "Manual")
+    scores["Uniqueness"] = round(sum(vals)/len(vals), 2) if vals else None
+
+    col = rules["validity_col"]
+    allowed = [x.strip() for x in str(rules["allowed_values"]).split(",") if x.strip()]
+    if col and allowed:
+        s = safe_text(df[col])
+        ok = s.isin(allowed) | (s == "")
+        scores["Validity"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, col, "Validity", f"Value not in allowed list: {allowed}", str(df.at[idx, col]), "Medium", "Manual")
+
+    col = rules["accuracy_col"]
+    refs = [x.strip() for x in str(rules["accuracy_reference_values"]).split(",") if x.strip()]
+    if col and refs:
+        s = safe_text(df[col])
+        ok = s.isin(refs) | (s == "")
+        scores["Accuracy"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, col, "Accuracy", f"Value not matching reference values: {refs}", str(df.at[idx, col]), "Medium", "Manual")
+
+    if_col = rules["cons_if_col"]
+    then_col = rules["cons_then_col"]
+    if if_col and then_col:
+        if_val = str(rules["cons_if_val"]).strip()
+        then_val = str(rules["cons_then_val"]).strip()
+        applicable = safe_text(df[if_col]) == if_val
+        ok = (~applicable) | (safe_text(df[then_col]) == then_val)
+        scores["Consistency"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, f"{if_col} -> {then_col}", "Consistency", f"If {if_col}={if_val}, then {then_col}={then_val}", f"{df.at[idx, if_col]} -> {df.at[idx, then_col]}", "Medium", "Manual")
+
+    s_col = rules["time_start_col"]
+    e_col = rules["time_end_col"]
+    if s_col and e_col:
+        s_dt = pd.to_datetime(df[s_col], errors="coerce")
+        e_dt = pd.to_datetime(df[e_col], errors="coerce")
+        ok = (e_dt >= s_dt) | s_dt.isna() | e_dt.isna()
+        scores["Timeliness"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "End time is before start time", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Manual")
+
+    col = rules["range_col"]
+    min_val = str(rules["min_val"]).strip()
+    max_val = str(rules["max_val"]).strip()
+    if col and (min_val or max_val):
+        num = pd.to_numeric(df[col], errors="coerce")
+        ok = pd.Series([True] * len(df), index=df.index)
+        if min_val:
+            ok &= (num >= float(min_val)) | num.isna()
+        if max_val:
+            ok &= (num <= float(max_val)) | num.isna()
+        scores["Range"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, col, "Range", f"Value outside range [{min_val or '-∞'} - {max_val or '∞'}]", str(df.at[idx, col]), "High", "Manual")
+
+    col = rules["format_col"]
+    regex = str(rules["regex_pattern"]).strip()
+    if col and regex:
+        s = safe_text(df[col])
+        ok = s.apply(lambda x: bool(re.fullmatch(regex, x)) if x != "" else True)
+        scores["Format/Pattern"] = round(ok.mean() * 100, 2)
+        for idx in df.index[~ok]:
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", f"Value does not match pattern: {regex}", str(df.at[idx, col]), "High", "Manual")
+
+    return scores, issues
+
+def merge_scores(auto_scores=None, manual_scores=None):
+    merged = {k: None for k in GENERAL_DIMENSIONS}
+    for k in GENERAL_DIMENSIONS:
+        vals = []
+        if auto_scores and auto_scores.get(k) is not None:
+            vals.append(auto_scores[k])
+        if manual_scores and manual_scores.get(k) is not None:
+            vals.append(manual_scores[k])
+        merged[k] = round(sum(vals)/len(vals), 2) if vals else None
+    return merged
+
+def scores_to_df(scores):
+    rows = []
+    for dim in GENERAL_DIMENSIONS:
+        rows.append({"Code": dim, "المعيار": AR_LABELS[dim], "النسبة %": scores.get(dim)})
+    return pd.DataFrame(rows)
+
+def overall_score(scores):
+    vals = [v for v in scores.values() if v is not None]
+    return round(sum(vals)/len(vals), 2) if vals else None
 
 def render_dashboard(scores_df, issues_df):
-    st.subheader("📊 داش بورد جودة البيانات")
+    st.subheader("📊 Dashboard")
+    active_scores = scores_df.dropna(subset=["النسبة %"]).copy()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("عدد المشكلات", int(len(issues_df)))
-    c2.metric("عدد المعايير", int(len(scores_df)))
-    c3.metric("متوسط نسب المعايير", f'{round(scores_df["النسبة %"].mean(),2) if not scores_df.empty else 100.0}%')
+    c1.metric("Issues Count", int(len(issues_df)))
+    c2.metric("Active Dimensions", int(len(active_scores)))
+    avg = round(active_scores["النسبة %"].mean(), 2) if not active_scores.empty else 0
+    c3.metric("Average Score", f"{avg}%")
 
-    if not scores_df.empty:
-        fig = plt.figure(figsize=(8,4))
-        plt.bar(scores_df["المعيار"], scores_df["النسبة %"])
+    if not active_scores.empty:
+        fig1 = plt.figure(figsize=(8, 4))
+        plt.bar(active_scores["Code"], active_scores["النسبة %"])
         plt.xticks(rotation=45, ha="right")
-        plt.ylabel("النسبة %")
-        plt.title("نسبة كل معيار")
-        st.pyplot(fig)
+        plt.ylabel("Score %")
+        plt.title("Score by Dimension")
+        st.pyplot(fig1)
 
     if not issues_df.empty:
         dim_counts = issues_df["Dimension"].value_counts()
-        fig = plt.figure(figsize=(8,4))
+        fig2 = plt.figure(figsize=(8, 4))
         plt.bar(dim_counts.index, dim_counts.values)
         plt.xticks(rotation=45, ha="right")
-        plt.ylabel("عدد المشكلات")
-        plt.title("المشكلات حسب المعيار")
-        st.pyplot(fig)
+        plt.ylabel("Issues Count")
+        plt.title("Issues by Dimension")
+        st.pyplot(fig2)
 
         sev_counts = issues_df["Severity"].value_counts()
-        fig = plt.figure(figsize=(6,4))
+        fig3 = plt.figure(figsize=(6, 4))
         plt.pie(sev_counts.values, labels=sev_counts.index, autopct="%1.1f%%")
-        plt.title("توزيع الشدة")
-        st.pyplot(fig)
+        plt.title("Issues by Severity")
+        st.pyplot(fig3)
 
         top_cols = issues_df["Column"].value_counts().head(10)
-        fig = plt.figure(figsize=(8,4))
+        fig4 = plt.figure(figsize=(8, 4))
         plt.bar(top_cols.index, top_cols.values)
         plt.xticks(rotation=45, ha="right")
-        plt.ylabel("عدد المشكلات")
-        plt.title("أكثر الأعمدة التي فيها مشكلات")
-        st.pyplot(fig)
+        plt.ylabel("Issues Count")
+        plt.title("Top Problematic Columns")
+        st.pyplot(fig4)
 
 uploaded_file = st.file_uploader("📁 ارفع ملف Excel أو CSV", type=["csv", "xlsx"])
 
 if uploaded_file:
     df = read_file(uploaded_file)
+    cols = list(df.columns)
 
-    st.subheader("🔍 معاينة البيانات")
+    if "manual_rules_working" not in st.session_state or st.session_state.get("cols_snapshot_working") != cols:
+        st.session_state["manual_rules_working"] = default_rules()
+        st.session_state["cols_snapshot_working"] = cols
+
+    st.subheader("🔎 معاينة البيانات")
     st.dataframe(df.head(20), use_container_width=True)
 
-    with st.expander("📌 الأعمدة المكتشفة تلقائيًا", expanded=False):
-        groups = detect_column_groups(df)
+    st.subheader("📌 مستوى المعايير العامة")
+    cards = st.columns(4)
+    for i, dim in enumerate(GENERAL_DIMENSIONS):
+        with cards[i % 4]:
+            st.markdown(f'<div class="metric-card"><b>{i+1}. {dim}</b><br>{AR_LABELS[dim]}</div>', unsafe_allow_html=True)
+
+    with st.expander("📍 الأعمدة المكتشفة تلقائيًا", expanded=False):
+        groups = detect_groups(df)
         for k, v in groups.items():
             st.write(f"**{k}:** {v if v else 'لا يوجد'}")
 
-    if st.button("🚀 تشغيل الفحص التلقائي المحسن", type="primary"):
-        scores_df, issues_df, overall, groups = auto_assess(df)
+    mode = st.radio("طريقة التقييم", ["تلقائي", "يدوي", "مختلط"], horizontal=True)
+
+    if mode in ["يدوي", "مختلط"]:
+        rules = st.session_state["manual_rules_working"]
+        st.subheader("⚙️ الإعدادات اليدوية حسب المعايير")
+
+        left, right = st.columns(2)
+        with left:
+            rules["required_cols"] = st.multiselect("Completeness - الأعمدة الإلزامية", cols, default=rules["required_cols"])
+            rules["unique_cols"] = st.multiselect("Uniqueness - أعمدة التفرد", cols, default=rules["unique_cols"])
+            rules["validity_col"] = st.selectbox("Validity - عمود القيم المسموحة", [""] + cols, index=([""] + cols).index(rules["validity_col"]) if rules["validity_col"] in ([""] + cols) else 0)
+            rules["allowed_values"] = st.text_input("Validity - القيم المسموحة", value=rules["allowed_values"])
+            rules["accuracy_col"] = st.selectbox("Accuracy - العمود المرجعي", [""] + cols, index=([""] + cols).index(rules["accuracy_col"]) if rules["accuracy_col"] in ([""] + cols) else 0)
+            rules["accuracy_reference_values"] = st.text_input("Accuracy - القيم المرجعية", value=rules["accuracy_reference_values"])
+
+        with right:
+            rules["cons_if_col"] = st.selectbox("Consistency - إذا كان العمود", [""] + cols, index=([""] + cols).index(rules["cons_if_col"]) if rules["cons_if_col"] in ([""] + cols) else 0)
+            rules["cons_if_val"] = st.text_input("Consistency - يساوي", value=rules["cons_if_val"])
+            rules["cons_then_col"] = st.selectbox("Consistency - فإن العمود", [""] + cols, index=([""] + cols).index(rules["cons_then_col"]) if rules["cons_then_col"] in ([""] + cols) else 0)
+            rules["cons_then_val"] = st.text_input("Consistency - يجب أن يساوي", value=rules["cons_then_val"])
+
+            rules["time_start_col"] = st.selectbox("Timeliness - عمود البداية", [""] + cols, index=([""] + cols).index(rules["time_start_col"]) if rules["time_start_col"] in ([""] + cols) else 0)
+            rules["time_end_col"] = st.selectbox("Timeliness - عمود النهاية", [""] + cols, index=([""] + cols).index(rules["time_end_col"]) if rules["time_end_col"] in ([""] + cols) else 0)
+
+            rules["range_col"] = st.selectbox("Range - العمود الرقمي", [""] + cols, index=([""] + cols).index(rules["range_col"]) if rules["range_col"] in ([""] + cols) else 0)
+            rules["min_val"] = st.text_input("Range - أقل قيمة", value=rules["min_val"])
+            rules["max_val"] = st.text_input("Range - أعلى قيمة", value=rules["max_val"])
+
+        rules["format_col"] = st.selectbox("Format/Pattern - عمود النمط", [""] + cols, index=([""] + cols).index(rules["format_col"]) if rules["format_col"] in ([""] + cols) else 0)
+        rules["regex_pattern"] = st.text_input("Format/Pattern - Regex", value=rules["regex_pattern"], placeholder=r"^\d{11}$")
+
+        st.session_state["manual_rules_working"] = rules
+
+    if st.button("🚀 تشغيل التقييم", type="primary"):
+        auto_scores = auto_issues = None
+        manual_scores = manual_issues = None
+
+        if mode in ["تلقائي", "مختلط"]:
+            auto_scores, auto_issues, _ = auto_assess(df)
+
+        if mode in ["يدوي", "مختلط"]:
+            manual_scores, manual_issues = manual_assess(df, st.session_state["manual_rules_working"])
+
+        merged = merge_scores(auto_scores, manual_scores)
+        scores_df = scores_to_df(merged)
+        ov = overall_score(merged)
+
+        issues_df = pd.DataFrame((auto_issues or []) + (manual_issues or []))
+        if not issues_df.empty:
+            issues_df = issues_df.drop_duplicates()
 
         st.subheader("📈 النتائج")
-        st.metric("🎯 النسبة الكلية لجودة البيانات", f"{overall}%")
+        st.metric("🎯 النسبة الكلية لجودة البيانات", f"{ov}%" if ov is not None else "No active rules")
         st.dataframe(scores_df, use_container_width=True)
 
         render_dashboard(scores_df, issues_df)
 
         st.subheader("⚠️ المشكلات المكتشفة")
         if issues_df.empty:
-            st.success("لم يتم اكتشاف مشكلات تلقائية وفق القواعد الحالية.")
+            st.success("لم يتم اكتشاف مشكلات وفق القواعد الحالية.")
         else:
             st.dataframe(issues_df, use_container_width=True)
-            st.download_button(
-                "⬇️ تحميل تقرير المشكلات CSV",
-                issues_df.to_csv(index=False).encode("utf-8-sig"),
-                "smart_v31_detected_issues.csv",
-                "text/csv"
-            )
+            st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "dq_issues_working.csv", "text/csv")
 
-        st.download_button(
-            "⬇️ تحميل نسب المعايير CSV",
-            scores_df.to_csv(index=False).encode("utf-8-sig"),
-            "smart_v31_quality_scores.csv",
-            "text/csv"
-        )
+        st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "dq_scores_working.csv", "text/csv")
+        st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["manual_rules_working"], ensure_ascii=False, indent=2).encode("utf-8"), "dq_rules_working.json", "application/json")
