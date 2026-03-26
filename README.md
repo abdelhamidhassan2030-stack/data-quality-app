@@ -1,1 +1,1 @@
-# EFB Data Quality App - Title Fix
+# EFB Data Quality App - Final Layout Fix

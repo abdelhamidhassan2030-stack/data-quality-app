@@ -14,34 +14,43 @@ html, body, [class*="css"] {
 }
 .block-container {
     padding-top: 1rem;
-    max-width: 1180px;
+    max-width: 1220px;
+}
+.header-wrap {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 0.75rem;
+}
+.title-wrap {
+    text-align: right;
 }
 .main-title {
     color: #0F5A36;
-    font-size: 1.55rem;
+    font-size: 1.45rem;
     font-weight: 800;
-    line-height: 1.8;
-    text-align: center;
-    margin-bottom: 0.1rem;
+    line-height: 1.7;
+    margin-bottom: 0.15rem;
     white-space: normal;
+    word-break: break-word;
 }
-.sub-title {
+.header-meta {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.sub-title, .org-title {
     color: #4C5A5D;
-    font-size: 1.05rem;
+    font-size: 1rem;
     font-weight: 700;
-    text-align: center;
-    margin-bottom: 0.12rem;
 }
 .org-title {
     color: #0F5A36;
-    font-size: 1rem;
-    font-weight: 700;
-    text-align: center;
-    margin-bottom: 1rem;
 }
 .section-title {
     color: #0F5A36;
-    font-size: 1.2rem;
+    font-size: 1.18rem;
     font-weight: 800;
     margin: 0.5rem 0 0.75rem 0;
 }
@@ -72,10 +81,6 @@ html, body, [class*="css"] {
     line-height: 1.8;
     margin-bottom: 1rem;
 }
-.small-muted {
-    color: #66777A;
-    font-size: 0.9rem;
-}
 .stButton > button {
     width: 100%;
     border-radius: 14px;
@@ -92,6 +97,22 @@ html, body, [class*="css"] {
     border-radius: 12px 12px 0 0;
     padding: 10px 16px;
 }
+.small-muted {
+    color: #66777A;
+    font-size: 0.9rem;
+}
+@media (max-width: 768px) {
+    .header-wrap {
+        flex-direction: column;
+        align-items: center;
+    }
+    .title-wrap {
+        text-align: center;
+    }
+    .header-meta {
+        justify-content: center;
+    }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -101,14 +122,8 @@ plt.rcParams["axes.unicode_minus"] = False
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/ar/0/0b/Egyptian_Food_Bank.jpg"
 
 GENERAL_DIMENSIONS = [
-    "Completeness",
-    "Uniqueness",
-    "Validity",
-    "Accuracy",
-    "Consistency",
-    "Timeliness",
-    "Range",
-    "Format/Pattern",
+    "Completeness", "Uniqueness", "Validity", "Accuracy",
+    "Consistency", "Timeliness", "Range", "Format/Pattern"
 ]
 
 AR_LABELS = {
@@ -306,9 +321,6 @@ def auto_assess(df):
         sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
             add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "وقت النهاية أقدم من وقت البداية", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Auto")
-        duration = (e_dt - s_dt).dt.total_seconds() / 60
-        for idx in df.index[(duration > 30).fillna(False)]:
-            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "مدة المقابلة أطول من 30 دقيقة", round(duration.loc[idx], 2), "Medium", "Auto")
     scores["Timeliness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     sub_scores = []
@@ -485,13 +497,12 @@ def render_dashboard(scores_df, issues_df):
         plt.title("Issues by Severity")
         st.pyplot(fig3)
 
-logo_col, title_col = st.columns([1, 6])
+logo_col, title_col = st.columns([1, 7])
 with logo_col:
-    st.image(LOGO_URL, width=95)
+    st.image(LOGO_URL, width=90)
 with title_col:
-    st.markdown('<div class="main-title">تطبيق تقييم جودة البيانات</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">إدارة الرصد</div>', unsafe_allow_html=True)
-    st.markdown('<div class="org-title">بنك الطعام المصري</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-title">تطبيق تقييم جودة البيانات<br><span style="font-size:1rem;font-weight:700;">Data Quality App</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-meta"><span class="sub-title">إدارة الرصد</span><span class="org-title">بنك الطعام المصري</span></div>', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("📁 ارفع ملف Excel أو CSV", type=["csv", "xlsx"])
 
@@ -499,9 +510,9 @@ if uploaded_file:
     df = read_file(uploaded_file)
     cols = list(df.columns)
 
-    if "rules_title_fix" not in st.session_state or st.session_state.get("cols_title_fix") != cols:
-        st.session_state["rules_title_fix"] = default_rules()
-        st.session_state["cols_title_fix"] = cols
+    if "rules_layout_fix" not in st.session_state or st.session_state.get("cols_layout_fix") != cols:
+        st.session_state["rules_layout_fix"] = default_rules()
+        st.session_state["cols_layout_fix"] = cols
 
     st.markdown('<div class="section-title">🔎 معاينة البيانات</div>', unsafe_allow_html=True)
     rows_count, cols_count, missing_values, duplicate_rows, dtypes_df = dataframe_summary(df)
@@ -515,7 +526,6 @@ if uploaded_file:
     with m4:
         st.metric("الصفوف المكررة", duplicate_rows)
 
-    st.markdown(f'<div class="small-muted">أسماء الأعمدة: {", ".join(df.columns)}</div>', unsafe_allow_html=True)
     with st.expander("عرض أنواع البيانات لكل عمود", expanded=False):
         st.dataframe(dtypes_df, use_container_width=True)
 
@@ -532,7 +542,7 @@ if uploaded_file:
     else:
         st.markdown('<div class="note-box">في التقييم اليدوي يمكنك تحديد قواعد الفحص بنفسك وفقًا للمعايير العامة، مثل الأعمدة الإلزامية، والتفرد، والقيم المسموحة، والقيم المرجعية للدقة، والنطاق، والنمط، والتسلسل الزمني، والاتساق بين الحقول.</div>', unsafe_allow_html=True)
 
-        rules = st.session_state["rules_title_fix"]
+        rules = st.session_state["rules_layout_fix"]
         left, right = st.columns(2)
         with left:
             rules["required_cols"] = st.multiselect("Completeness - الأعمدة الإلزامية", cols, default=rules["required_cols"])
@@ -553,13 +563,13 @@ if uploaded_file:
             rules["max_val"] = st.text_input("Range - أعلى قيمة", value=rules["max_val"])
         rules["format_col"] = st.selectbox("Format/Pattern - عمود النمط", [""] + cols, index=([""] + cols).index(rules["format_col"]) if rules["format_col"] in ([""] + cols) else 0)
         rules["regex_pattern"] = st.text_input("Format/Pattern - Regex", value=rules["regex_pattern"], placeholder=r"^\d{11}$")
-        st.session_state["rules_title_fix"] = rules
+        st.session_state["rules_layout_fix"] = rules
 
     if st.button("🚀 تشغيل التقييم"):
         if mode == "تلقائي":
             scores, issues = auto_assess(df)
         else:
-            scores, issues = manual_assess(df, st.session_state["rules_title_fix"])
+            scores, issues = manual_assess(df, st.session_state["rules_layout_fix"])
 
         issues_df = pd.DataFrame(issues)
         if not issues_df.empty:
@@ -578,10 +588,10 @@ if uploaded_file:
                 st.success("لم يتم اكتشاف مشكلات وفق القواعد الحالية.")
             else:
                 st.dataframe(issues_df, use_container_width=True)
-                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues_title_fix.csv", "text/csv")
-            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores_title_fix.csv", "text/csv")
+                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues_layout_fix.csv", "text/csv")
+            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores_layout_fix.csv", "text/csv")
             if mode == "يدوي":
-                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_title_fix"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules_title_fix.json", "application/json")
+                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_layout_fix"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules_layout_fix.json", "application/json")
         with charts_tab:
             st.markdown('<div class="section-title">📈 الرسوم البيانية لجودة البيانات</div>', unsafe_allow_html=True)
             render_dashboard(scores_df, issues_df)
