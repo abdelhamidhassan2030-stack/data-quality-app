@@ -1,1 +1,1 @@
-Updated app with auto-detect mode and manual mode.
+Updated app: accepts phone numbers with or without leading zero and adds a dashboard.
