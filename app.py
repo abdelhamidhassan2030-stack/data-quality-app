@@ -6,9 +6,6 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Data Quality App", layout="wide")
 
-# =========================
-# Styling
-# =========================
 st.markdown("""
 <style>
 html, body, [class*="css"] {
@@ -21,23 +18,23 @@ html, body, [class*="css"] {
 }
 .main-title {
     color: #0F5A36;
-    font-size: 2rem;
+    font-size: 1.55rem;
     font-weight: 800;
-    line-height: 1.45;
+    line-height: 1.8;
     text-align: center;
-    word-break: break-word;
-    margin-bottom: 0.2rem;
+    margin-bottom: 0.1rem;
+    white-space: normal;
 }
 .sub-title {
     color: #4C5A5D;
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
     text-align: center;
-    margin-bottom: 0.15rem;
+    margin-bottom: 0.12rem;
 }
 .org-title {
     color: #0F5A36;
-    font-size: 1.05rem;
+    font-size: 1rem;
     font-weight: 700;
     text-align: center;
     margin-bottom: 1rem;
@@ -75,11 +72,9 @@ html, body, [class*="css"] {
     line-height: 1.8;
     margin-bottom: 1rem;
 }
-.metric-box {
-    background: #F7FAF8;
-    border: 1px solid #DDE8E2;
-    border-radius: 14px;
-    padding: 12px 14px;
+.small-muted {
+    color: #66777A;
+    font-size: 0.9rem;
 }
 .stButton > button {
     width: 100%;
@@ -103,7 +98,6 @@ html, body, [class*="css"] {
 plt.rcParams["font.family"] = "DejaVu Sans"
 plt.rcParams["axes.unicode_minus"] = False
 
-# Public logo URL used in header
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/ar/0/0b/Egyptian_Food_Bank.jpg"
 
 GENERAL_DIMENSIONS = [
@@ -139,9 +133,6 @@ DIM_DESCRIPTIONS = {
     "Format/Pattern": "فحص شكل القيمة مثل أرقام الهاتف أو البطاقات أو الأكواد.",
 }
 
-# =========================
-# Helpers
-# =========================
 def read_file(uploaded_file):
     name = uploaded_file.name.lower()
     if name.endswith(".csv"):
@@ -196,39 +187,24 @@ def col_matches(col_name, patterns):
 
 def detect_groups(df):
     groups = {
-        "phone": [],
-        "national_id": [],
-        "card_like": [],
-        "start": [],
-        "end": [],
-        "id_like": [],
-        "categorical": [],
-        "numeric": [],
-        "required_candidates": [],
-        "age_like": [],
+        "phone": [], "national_id": [], "card_like": [], "start": [], "end": [],
+        "id_like": [], "categorical": [], "numeric": [], "required_candidates": [], "age_like": []
     }
     for col in df.columns:
         c = str(col).lower()
         s = df[col]
-
         if col_matches(c, ["phone", "mobile", "تليفون", "هاتف", "موبايل"]):
             groups["phone"].append(col)
-
         if col_matches(c, ["national id", "national_id", "nid", "رقم قومي", "الرقم القومي"]):
             groups["national_id"].append(col)
-
         if col_matches(c, ["card", "بطاقة"]):
             groups["card_like"].append(col)
-
         if c == "start" or "start" in c or "بداية" in c:
             groups["start"].append(col)
-
         if c == "end" or "end" in c or "نهاية" in c:
             groups["end"].append(col)
-
         if c in ["id", "_id", "uuid", "_uuid"] or "uuid" in c:
             groups["id_like"].append(col)
-
         if "age" in c or "عمر" in c:
             groups["age_like"].append(col)
 
@@ -258,21 +234,14 @@ def dataframe_summary(df):
     rows, cols = df.shape
     missing_values = int(df.isna().sum().sum())
     duplicate_rows = int(df.duplicated().sum())
-    dtypes_df = pd.DataFrame({
-        "العمود": df.columns,
-        "نوع البيانات": [str(t) for t in df.dtypes]
-    })
+    dtypes_df = pd.DataFrame({"العمود": df.columns, "نوع البيانات": [str(t) for t in df.dtypes]})
     return rows, cols, missing_values, duplicate_rows, dtypes_df
 
-# =========================
-# Auto assessment
-# =========================
 def auto_assess(df):
     groups = detect_groups(df)
     issues = []
     scores = {k: None for k in GENERAL_DIMENSIONS}
 
-    # Completeness
     checks = passed = 0
     for col in groups["required_candidates"]:
         ok = df[col].notna() & (safe_text(df[col]) != "")
@@ -282,7 +251,6 @@ def auto_assess(df):
             add_issue(issues, int(idx)+2, col, "Completeness", "قيمة مفقودة في عمود أساسي", str(df.at[idx, col]), "High", "Auto")
     scores["Completeness"] = pct(passed, checks)
 
-    # Uniqueness
     sub_scores = []
     for col in groups["id_like"] + groups["national_id"] + groups["card_like"]:
         vals = df[col].apply(to_digits) if col in groups["national_id"] + groups["card_like"] else safe_text(df[col])
@@ -292,7 +260,6 @@ def auto_assess(df):
             add_issue(issues, int(idx)+2, col, "Uniqueness", "قيمة مكررة في عمود معرف", str(df.at[idx, col]), "High", "Auto")
     scores["Uniqueness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Validity
     sub_scores = []
     for col in groups["categorical"]:
         s = safe_text(df[col])
@@ -311,10 +278,8 @@ def auto_assess(df):
                 add_issue(issues, int(idx)+2, col, "Validity", "قيمة نادرة أو غير متسقة محتملة", str(df.at[idx, col]), "Medium", "Auto")
     scores["Validity"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Accuracy reserved for manual/reference checks
     scores["Accuracy"] = None
 
-    # Consistency
     cols = list(df.columns)
     comment_cols = [c for c in cols if col_matches(c, ["comment", "explain", "تعليق", "توضيح", "سبب آخر", "أخرى", "اخري"])]
     checks = passed = 0
@@ -331,7 +296,6 @@ def auto_assess(df):
                 add_issue(issues, int(i)+2, f"{parent} -> {comment_col}", "Consistency", "تم إدخال تعليق بينما الحقل السابق فارغ", f"{df.at[i, parent]} -> {df.at[i, comment_col]}", "Medium", "Auto")
     scores["Consistency"] = pct(passed, checks)
 
-    # Timeliness
     sub_scores = []
     if groups["start"] and groups["end"]:
         s_col = groups["start"][0]
@@ -347,7 +311,6 @@ def auto_assess(df):
             add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "مدة المقابلة أطول من 30 دقيقة", round(duration.loc[idx], 2), "Medium", "Auto")
     scores["Timeliness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Range
     sub_scores = []
     for col in groups["numeric"]:
         num = pd.to_numeric(df[col], errors="coerce")
@@ -375,7 +338,6 @@ def auto_assess(df):
             add_issue(issues, int(idx)+2, col, "Range", "قيمة شاذة خارج النطاق المتوقع", str(df.at[idx, col]), "Medium", "Auto")
     scores["Range"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
-    # Format
     sub_scores = []
     for col in groups["phone"]:
         norm = df[col].apply(normalize_phone)
@@ -393,26 +355,12 @@ def auto_assess(df):
 
     return scores, issues
 
-# ========= Manual =========
 def default_rules():
     return {
-        "required_cols": [],
-        "unique_cols": [],
-        "validity_col": "",
-        "allowed_values": "",
-        "accuracy_col": "",
-        "accuracy_reference_values": "",
-        "cons_if_col": "",
-        "cons_if_val": "",
-        "cons_then_col": "",
-        "cons_then_val": "",
-        "time_start_col": "",
-        "time_end_col": "",
-        "range_col": "",
-        "min_val": "",
-        "max_val": "",
-        "format_col": "",
-        "regex_pattern": "",
+        "required_cols": [], "unique_cols": [], "validity_col": "", "allowed_values": "",
+        "accuracy_col": "", "accuracy_reference_values": "", "cons_if_col": "", "cons_if_val": "",
+        "cons_then_col": "", "cons_then_val": "", "time_start_col": "", "time_end_col": "",
+        "range_col": "", "min_val": "", "max_val": "", "format_col": "", "regex_pattern": "",
     }
 
 def manual_assess(df, rules):
@@ -501,14 +449,7 @@ def manual_assess(df, rules):
     return scores, issues
 
 def scores_to_df(scores):
-    rows = []
-    for dim in GENERAL_DIMENSIONS:
-        rows.append({
-            "Code": dim,
-            "المعيار": AR_LABELS[dim],
-            "النسبة %": scores.get(dim)
-        })
-    return pd.DataFrame(rows)
+    return pd.DataFrame([{"Code": dim, "المعيار": AR_LABELS[dim], "النسبة %": scores.get(dim)} for dim in GENERAL_DIMENSIONS])
 
 def overall_score(scores):
     vals = [v for v in scores.values() if v is not None]
@@ -544,7 +485,6 @@ def render_dashboard(scores_df, issues_df):
         plt.title("Issues by Severity")
         st.pyplot(fig3)
 
-# ========= Header =========
 logo_col, title_col = st.columns([1, 6])
 with logo_col:
     st.image(LOGO_URL, width=95)
@@ -559,12 +499,11 @@ if uploaded_file:
     df = read_file(uploaded_file)
     cols = list(df.columns)
 
-    if "rules_final_edits" not in st.session_state or st.session_state.get("cols_final_edits") != cols:
-        st.session_state["rules_final_edits"] = default_rules()
-        st.session_state["cols_final_edits"] = cols
+    if "rules_title_fix" not in st.session_state or st.session_state.get("cols_title_fix") != cols:
+        st.session_state["rules_title_fix"] = default_rules()
+        st.session_state["cols_title_fix"] = cols
 
     st.markdown('<div class="section-title">🔎 معاينة البيانات</div>', unsafe_allow_html=True)
-
     rows_count, cols_count, missing_values, duplicate_rows, dtypes_df = dataframe_summary(df)
     m1, m2, m3, m4 = st.columns(4)
     with m1:
@@ -584,10 +523,7 @@ if uploaded_file:
     cards = st.columns(4)
     for i, dim in enumerate(GENERAL_DIMENSIONS):
         with cards[i % 4]:
-            st.markdown(
-                f'<div class="card"><div class="card-title">{i+1}. {dim}</div><div class="card-desc">{AR_LABELS[dim]}<br>{DIM_DESCRIPTIONS[dim]}</div></div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f'<div class="card"><div class="card-title">{i+1}. {dim}</div><div class="card-desc">{AR_LABELS[dim]}<br>{DIM_DESCRIPTIONS[dim]}</div></div>', unsafe_allow_html=True)
 
     mode = st.radio("طريقة التقييم", ["تلقائي", "يدوي"], horizontal=True)
 
@@ -596,9 +532,8 @@ if uploaded_file:
     else:
         st.markdown('<div class="note-box">في التقييم اليدوي يمكنك تحديد قواعد الفحص بنفسك وفقًا للمعايير العامة، مثل الأعمدة الإلزامية، والتفرد، والقيم المسموحة، والقيم المرجعية للدقة، والنطاق، والنمط، والتسلسل الزمني، والاتساق بين الحقول.</div>', unsafe_allow_html=True)
 
-        rules = st.session_state["rules_final_edits"]
+        rules = st.session_state["rules_title_fix"]
         left, right = st.columns(2)
-
         with left:
             rules["required_cols"] = st.multiselect("Completeness - الأعمدة الإلزامية", cols, default=rules["required_cols"])
             rules["unique_cols"] = st.multiselect("Uniqueness - أعمدة التفرد", cols, default=rules["unique_cols"])
@@ -606,29 +541,25 @@ if uploaded_file:
             rules["allowed_values"] = st.text_input("Validity - القيم المسموحة", value=rules["allowed_values"])
             rules["accuracy_col"] = st.selectbox("Accuracy - العمود المرجعي", [""] + cols, index=([""] + cols).index(rules["accuracy_col"]) if rules["accuracy_col"] in ([""] + cols) else 0)
             rules["accuracy_reference_values"] = st.text_input("Accuracy - القيم المرجعية", value=rules["accuracy_reference_values"])
-
         with right:
             rules["cons_if_col"] = st.selectbox("Consistency - إذا كان العمود", [""] + cols, index=([""] + cols).index(rules["cons_if_col"]) if rules["cons_if_col"] in ([""] + cols) else 0)
             rules["cons_if_val"] = st.text_input("Consistency - يساوي", value=rules["cons_if_val"])
             rules["cons_then_col"] = st.selectbox("Consistency - فإن العمود", [""] + cols, index=([""] + cols).index(rules["cons_then_col"]) if rules["cons_then_col"] in ([""] + cols) else 0)
             rules["cons_then_val"] = st.text_input("Consistency - يجب أن يساوي", value=rules["cons_then_val"])
-
             rules["time_start_col"] = st.selectbox("Timeliness - عمود البداية", [""] + cols, index=([""] + cols).index(rules["time_start_col"]) if rules["time_start_col"] in ([""] + cols) else 0)
             rules["time_end_col"] = st.selectbox("Timeliness - عمود النهاية", [""] + cols, index=([""] + cols).index(rules["time_end_col"]) if rules["time_end_col"] in ([""] + cols) else 0)
-
             rules["range_col"] = st.selectbox("Range - العمود الرقمي", [""] + cols, index=([""] + cols).index(rules["range_col"]) if rules["range_col"] in ([""] + cols) else 0)
             rules["min_val"] = st.text_input("Range - أقل قيمة", value=rules["min_val"])
             rules["max_val"] = st.text_input("Range - أعلى قيمة", value=rules["max_val"])
-
         rules["format_col"] = st.selectbox("Format/Pattern - عمود النمط", [""] + cols, index=([""] + cols).index(rules["format_col"]) if rules["format_col"] in ([""] + cols) else 0)
         rules["regex_pattern"] = st.text_input("Format/Pattern - Regex", value=rules["regex_pattern"], placeholder=r"^\d{11}$")
-        st.session_state["rules_final_edits"] = rules
+        st.session_state["rules_title_fix"] = rules
 
     if st.button("🚀 تشغيل التقييم"):
         if mode == "تلقائي":
             scores, issues = auto_assess(df)
         else:
-            scores, issues = manual_assess(df, st.session_state["rules_final_edits"])
+            scores, issues = manual_assess(df, st.session_state["rules_title_fix"])
 
         issues_df = pd.DataFrame(issues)
         if not issues_df.empty:
@@ -638,24 +569,19 @@ if uploaded_file:
         ov = overall_score(scores)
 
         results_tab, charts_tab = st.tabs(["📋 النتائج", "📈 الرسوم البيانية لجودة البيانات"])
-
         with results_tab:
             st.markdown('<div class="section-title">📈 النتائج</div>', unsafe_allow_html=True)
             st.metric("النسبة الكلية لجودة البيانات", f"{ov}%" if ov is not None else "لا توجد قواعد مفعلة")
             st.dataframe(scores_df, use_container_width=True)
-
             st.markdown('<div class="section-title">⚠️ المشكلات المكتشفة</div>', unsafe_allow_html=True)
             if issues_df.empty:
                 st.success("لم يتم اكتشاف مشكلات وفق القواعد الحالية.")
             else:
                 st.dataframe(issues_df, use_container_width=True)
-                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues_final.csv", "text/csv")
-
-            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores_final.csv", "text/csv")
-
+                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues_title_fix.csv", "text/csv")
+            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores_title_fix.csv", "text/csv")
             if mode == "يدوي":
-                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_final_edits"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules_final.json", "application/json")
-
+                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_title_fix"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules_title_fix.json", "application/json")
         with charts_tab:
             st.markdown('<div class="section-title">📈 الرسوم البيانية لجودة البيانات</div>', unsafe_allow_html=True)
             render_dashboard(scores_df, issues_df)
