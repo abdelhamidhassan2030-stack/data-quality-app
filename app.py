@@ -6,38 +6,48 @@ import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Data Quality App", layout="wide")
 
-# ========= Branding / Style =========
+# =========================
+# Styling
+# =========================
 st.markdown("""
 <style>
 html, body, [class*="css"] {
     direction: rtl;
     text-align: right;
 }
-
 .block-container {
     padding-top: 1rem;
     max-width: 1180px;
 }
-
 .main-title {
     color: #0F5A36;
+    font-size: 2rem;
     font-weight: 800;
-    font-size: 2.0rem;
-    margin-bottom: 0.15rem;
+    line-height: 1.45;
+    text-align: center;
+    word-break: break-word;
+    margin-bottom: 0.2rem;
 }
 .sub-title {
-    color: #5F6B6D;
+    color: #4C5A5D;
+    font-size: 1.1rem;
     font-weight: 700;
-    font-size: 1.05rem;
-    margin-bottom: 0.1rem;
+    text-align: center;
+    margin-bottom: 0.15rem;
 }
 .org-title {
     color: #0F5A36;
+    font-size: 1.05rem;
     font-weight: 700;
-    font-size: 1rem;
+    text-align: center;
     margin-bottom: 1rem;
 }
-
+.section-title {
+    color: #0F5A36;
+    font-size: 1.2rem;
+    font-weight: 800;
+    margin: 0.5rem 0 0.75rem 0;
+}
 .card {
     background: #F7FAF8;
     border: 1px solid #DDE8E2;
@@ -47,8 +57,8 @@ html, body, [class*="css"] {
 }
 .card-title {
     color: #0F5A36;
-    font-weight: 800;
     font-size: 1rem;
+    font-weight: 800;
     margin-bottom: 4px;
 }
 .card-desc {
@@ -56,21 +66,20 @@ html, body, [class*="css"] {
     font-size: 0.92rem;
     line-height: 1.55;
 }
-
-.section-title {
-    color: #0F5A36;
-    font-weight: 800;
-    font-size: 1.25rem;
-    margin: 0.5rem 0 0.75rem 0;
-}
 .note-box {
     background: #F7FAF8;
     border-right: 4px solid #0F5A36;
     border-radius: 12px;
     padding: 12px 14px;
     color: #304144;
-    line-height: 1.7;
+    line-height: 1.8;
     margin-bottom: 1rem;
+}
+.metric-box {
+    background: #F7FAF8;
+    border: 1px solid #DDE8E2;
+    border-radius: 14px;
+    padding: 12px 14px;
 }
 .stButton > button {
     width: 100%;
@@ -88,22 +97,13 @@ html, body, [class*="css"] {
     border-radius: 12px 12px 0 0;
     padding: 10px 16px;
 }
-.stMetric {
-    background: #F7FAF8;
-    border: 1px solid #DDE8E2;
-    padding: 10px 14px;
-    border-radius: 14px;
-}
-.small-muted {
-    color: #66777A;
-    font-size: 0.9rem;
-}
 </style>
 """, unsafe_allow_html=True)
 
 plt.rcParams["font.family"] = "DejaVu Sans"
 plt.rcParams["axes.unicode_minus"] = False
 
+# Public logo URL used in header
 LOGO_URL = "https://upload.wikimedia.org/wikipedia/ar/0/0b/Egyptian_Food_Bank.jpg"
 
 GENERAL_DIMENSIONS = [
@@ -139,7 +139,9 @@ DIM_DESCRIPTIONS = {
     "Format/Pattern": "فحص شكل القيمة مثل أرقام الهاتف أو البطاقات أو الأكواد.",
 }
 
-# ========= Helpers =========
+# =========================
+# Helpers
+# =========================
 def read_file(uploaded_file):
     name = uploaded_file.name.lower()
     if name.endswith(".csv"):
@@ -252,7 +254,19 @@ def detect_groups(df):
         groups[k] = list(dict.fromkeys(groups[k]))
     return groups
 
-# ========= Auto =========
+def dataframe_summary(df):
+    rows, cols = df.shape
+    missing_values = int(df.isna().sum().sum())
+    duplicate_rows = int(df.duplicated().sum())
+    dtypes_df = pd.DataFrame({
+        "العمود": df.columns,
+        "نوع البيانات": [str(t) for t in df.dtypes]
+    })
+    return rows, cols, missing_values, duplicate_rows, dtypes_df
+
+# =========================
+# Auto assessment
+# =========================
 def auto_assess(df):
     groups = detect_groups(df)
     issues = []
@@ -265,7 +279,7 @@ def auto_assess(df):
         checks += len(df)
         passed += int(ok.sum())
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Completeness", "Missing value in important column", str(df.at[idx, col]), "High", "Auto")
+            add_issue(issues, int(idx)+2, col, "Completeness", "قيمة مفقودة في عمود أساسي", str(df.at[idx, col]), "High", "Auto")
     scores["Completeness"] = pct(passed, checks)
 
     # Uniqueness
@@ -275,7 +289,7 @@ def auto_assess(df):
         dup = vals.duplicated(keep=False) & (vals != "") & (vals.str.lower() != "nan")
         sub_scores.append(round((~dup).mean() * 100, 2))
         for idx in df.index[dup]:
-            add_issue(issues, int(idx)+2, col, "Uniqueness", "Duplicate value in identifier column", str(df.at[idx, col]), "High", "Auto")
+            add_issue(issues, int(idx)+2, col, "Uniqueness", "قيمة مكررة في عمود معرف", str(df.at[idx, col]), "High", "Auto")
     scores["Uniqueness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     # Validity
@@ -294,7 +308,7 @@ def auto_assess(df):
             ok = ~s.isin(rare_values) | (s == "")
             sub_scores.append(round(ok.mean() * 100, 2))
             for idx in df.index[~ok]:
-                add_issue(issues, int(idx)+2, col, "Validity", "Suspicious rare value in categorical column", str(df.at[idx, col]), "Medium", "Auto")
+                add_issue(issues, int(idx)+2, col, "Validity", "قيمة نادرة أو غير متسقة محتملة", str(df.at[idx, col]), "Medium", "Auto")
     scores["Validity"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     # Accuracy reserved for manual/reference checks
@@ -314,7 +328,7 @@ def auto_assess(df):
             checks += len(df)
             passed += int(ok.sum())
             for i in df.index[~ok]:
-                add_issue(issues, int(i)+2, f"{parent} -> {comment_col}", "Consistency", "Comment filled while parent field is empty", f"{df.at[i, parent]} -> {df.at[i, comment_col]}", "Medium", "Auto")
+                add_issue(issues, int(i)+2, f"{parent} -> {comment_col}", "Consistency", "تم إدخال تعليق بينما الحقل السابق فارغ", f"{df.at[i, parent]} -> {df.at[i, comment_col]}", "Medium", "Auto")
     scores["Consistency"] = pct(passed, checks)
 
     # Timeliness
@@ -327,10 +341,10 @@ def auto_assess(df):
         ok = (e_dt >= s_dt) | s_dt.isna() | e_dt.isna()
         sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "End time is before start time", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Auto")
+            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "وقت النهاية أقدم من وقت البداية", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Auto")
         duration = (e_dt - s_dt).dt.total_seconds() / 60
         for idx in df.index[(duration > 30).fillna(False)]:
-            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "Interview duration > 30 minutes", round(duration.loc[idx], 2), "Medium", "Auto")
+            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "مدة المقابلة أطول من 30 دقيقة", round(duration.loc[idx], 2), "Medium", "Auto")
     scores["Timeliness"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     # Range
@@ -344,7 +358,7 @@ def auto_assess(df):
             ok = num.between(0, 120) | num.isna()
             sub_scores.append(round(ok.mean() * 100, 2))
             for idx in df.index[~ok]:
-                add_issue(issues, int(idx)+2, col, "Range", "Age is outside logical range [0 - 120]", str(df.at[idx, col]), "High", "Auto")
+                add_issue(issues, int(idx)+2, col, "Range", "القيمة خارج النطاق المنطقي للعمر", str(df.at[idx, col]), "High", "Auto")
             continue
         if is_identifier_name(col) or col in groups["phone"] or col in groups["national_id"] or col in groups["card_like"]:
             continue
@@ -358,7 +372,7 @@ def auto_assess(df):
         ok = num.between(low, high) | num.isna()
         sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Range", f"Outlier outside estimated range [{round(low,2)} - {round(high,2)}]", str(df.at[idx, col]), "Medium", "Auto")
+            add_issue(issues, int(idx)+2, col, "Range", "قيمة شاذة خارج النطاق المتوقع", str(df.at[idx, col]), "Medium", "Auto")
     scores["Range"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     # Format
@@ -368,13 +382,13 @@ def auto_assess(df):
         ok = norm.apply(lambda x: x == "" or (len(x) == 11 and x.startswith("0")))
         sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok & (norm != "")]:
-            add_issue(issues, int(idx)+2, col, "Format/Pattern", "Invalid phone format", str(df.at[idx, col]), "High", "Auto")
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", "تنسيق رقم الهاتف غير صحيح", str(df.at[idx, col]), "High", "Auto")
     for col in groups["national_id"] + groups["card_like"]:
         digits = df[col].apply(to_digits)
         ok = digits.apply(lambda x: x == "" or len(x) >= 8)
         sub_scores.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok & (digits != "")]:
-            add_issue(issues, int(idx)+2, col, "Format/Pattern", "Invalid card/ID format", str(df.at[idx, col]), "High", "Auto")
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", "تنسيق البطاقة أو الرقم غير صحيح", str(df.at[idx, col]), "High", "Auto")
     scores["Format/Pattern"] = round(sum(sub_scores)/len(sub_scores), 2) if sub_scores else None
 
     return scores, issues
@@ -410,7 +424,7 @@ def manual_assess(df, rules):
         ok = df[col].notna() & (safe_text(df[col]) != "")
         vals.append(round(ok.mean() * 100, 2))
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Completeness", "Missing value", str(df.at[idx, col]), "High", "Manual")
+            add_issue(issues, int(idx)+2, col, "Completeness", "قيمة مفقودة", str(df.at[idx, col]), "High", "Manual")
     scores["Completeness"] = round(sum(vals)/len(vals), 2) if vals else None
 
     vals = []
@@ -419,7 +433,7 @@ def manual_assess(df, rules):
         dup = s.duplicated(keep=False) & (s != "") & (s.str.lower() != "nan")
         vals.append(round((~dup).mean() * 100, 2))
         for idx in df.index[dup]:
-            add_issue(issues, int(idx)+2, col, "Uniqueness", "Duplicate value", str(df.at[idx, col]), "High", "Manual")
+            add_issue(issues, int(idx)+2, col, "Uniqueness", "قيمة مكررة", str(df.at[idx, col]), "High", "Manual")
     scores["Uniqueness"] = round(sum(vals)/len(vals), 2) if vals else None
 
     col = rules["validity_col"]
@@ -429,7 +443,7 @@ def manual_assess(df, rules):
         ok = s.isin(allowed) | (s == "")
         scores["Validity"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Validity", f"Value not in allowed list: {allowed}", str(df.at[idx, col]), "Medium", "Manual")
+            add_issue(issues, int(idx)+2, col, "Validity", "القيمة غير موجودة في القائمة المسموحة", str(df.at[idx, col]), "Medium", "Manual")
 
     col = rules["accuracy_col"]
     refs = [x.strip() for x in str(rules["accuracy_reference_values"]).split(",") if x.strip()]
@@ -438,7 +452,7 @@ def manual_assess(df, rules):
         ok = s.isin(refs) | (s == "")
         scores["Accuracy"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Accuracy", f"Value not matching reference values: {refs}", str(df.at[idx, col]), "Medium", "Manual")
+            add_issue(issues, int(idx)+2, col, "Accuracy", "القيمة لا تطابق القيم المرجعية", str(df.at[idx, col]), "Medium", "Manual")
 
     if_col = rules["cons_if_col"]
     then_col = rules["cons_then_col"]
@@ -449,7 +463,7 @@ def manual_assess(df, rules):
         ok = (~applicable) | (safe_text(df[then_col]) == then_val)
         scores["Consistency"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, f"{if_col} -> {then_col}", "Consistency", f"If {if_col}={if_val}, then {then_col}={then_val}", f"{df.at[idx, if_col]} -> {df.at[idx, then_col]}", "Medium", "Manual")
+            add_issue(issues, int(idx)+2, f"{if_col} -> {then_col}", "Consistency", "العلاقة بين الحقول غير متسقة", f"{df.at[idx, if_col]} -> {df.at[idx, then_col]}", "Medium", "Manual")
 
     s_col = rules["time_start_col"]
     e_col = rules["time_end_col"]
@@ -459,7 +473,7 @@ def manual_assess(df, rules):
         ok = (e_dt >= s_dt) | s_dt.isna() | e_dt.isna()
         scores["Timeliness"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "End time is before start time", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Manual")
+            add_issue(issues, int(idx)+2, f"{s_col} -> {e_col}", "Timeliness", "وقت النهاية أقدم من وقت البداية", f"{df.at[idx, s_col]} -> {df.at[idx, e_col]}", "High", "Manual")
 
     col = rules["range_col"]
     min_val = str(rules["min_val"]).strip()
@@ -473,7 +487,7 @@ def manual_assess(df, rules):
             ok &= (num <= float(max_val)) | num.isna()
         scores["Range"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Range", f"Value outside range [{min_val or '-∞'} - {max_val or '∞'}]", str(df.at[idx, col]), "High", "Manual")
+            add_issue(issues, int(idx)+2, col, "Range", "القيمة خارج النطاق المحدد", str(df.at[idx, col]), "High", "Manual")
 
     col = rules["format_col"]
     regex = str(rules["regex_pattern"]).strip()
@@ -482,20 +496,9 @@ def manual_assess(df, rules):
         ok = s.apply(lambda x: bool(re.fullmatch(regex, x)) if x != "" else True)
         scores["Format/Pattern"] = round(ok.mean() * 100, 2)
         for idx in df.index[~ok]:
-            add_issue(issues, int(idx)+2, col, "Format/Pattern", f"Value does not match pattern: {regex}", str(df.at[idx, col]), "High", "Manual")
+            add_issue(issues, int(idx)+2, col, "Format/Pattern", "القيمة لا تطابق النمط المحدد", str(df.at[idx, col]), "High", "Manual")
 
     return scores, issues
-
-def merge_scores(auto_scores=None, manual_scores=None):
-    merged = {k: None for k in GENERAL_DIMENSIONS}
-    for k in GENERAL_DIMENSIONS:
-        vals = []
-        if auto_scores and auto_scores.get(k) is not None:
-            vals.append(auto_scores[k])
-        if manual_scores and manual_scores.get(k) is not None:
-            vals.append(manual_scores[k])
-        merged[k] = round(sum(vals)/len(vals), 2) if vals else None
-    return merged
 
 def scores_to_df(scores):
     rows = []
@@ -542,10 +545,10 @@ def render_dashboard(scores_df, issues_df):
         st.pyplot(fig3)
 
 # ========= Header =========
-h1, h2 = st.columns([1, 6])
-with h1:
-    st.image(LOGO_URL, width=100)
-with h2:
+logo_col, title_col = st.columns([1, 6])
+with logo_col:
+    st.image(LOGO_URL, width=95)
+with title_col:
     st.markdown('<div class="main-title">تطبيق تقييم جودة البيانات</div>', unsafe_allow_html=True)
     st.markdown('<div class="sub-title">إدارة الرصد</div>', unsafe_allow_html=True)
     st.markdown('<div class="org-title">بنك الطعام المصري</div>', unsafe_allow_html=True)
@@ -556,12 +559,26 @@ if uploaded_file:
     df = read_file(uploaded_file)
     cols = list(df.columns)
 
-    if "rules_ui_final" not in st.session_state or st.session_state.get("cols_ui_final") != cols:
-        st.session_state["rules_ui_final"] = default_rules()
-        st.session_state["cols_ui_final"] = cols
+    if "rules_final_edits" not in st.session_state or st.session_state.get("cols_final_edits") != cols:
+        st.session_state["rules_final_edits"] = default_rules()
+        st.session_state["cols_final_edits"] = cols
 
     st.markdown('<div class="section-title">🔎 معاينة البيانات</div>', unsafe_allow_html=True)
-    st.dataframe(df.head(20), use_container_width=True)
+
+    rows_count, cols_count, missing_values, duplicate_rows, dtypes_df = dataframe_summary(df)
+    m1, m2, m3, m4 = st.columns(4)
+    with m1:
+        st.metric("عدد الصفوف", rows_count)
+    with m2:
+        st.metric("عدد الأعمدة", cols_count)
+    with m3:
+        st.metric("القيم الفارغة", missing_values)
+    with m4:
+        st.metric("الصفوف المكررة", duplicate_rows)
+
+    st.markdown(f'<div class="small-muted">أسماء الأعمدة: {", ".join(df.columns)}</div>', unsafe_allow_html=True)
+    with st.expander("عرض أنواع البيانات لكل عمود", expanded=False):
+        st.dataframe(dtypes_df, use_container_width=True)
 
     st.markdown('<div class="section-title">📌 مستوى المعايير العامة</div>', unsafe_allow_html=True)
     cards = st.columns(4)
@@ -575,11 +592,11 @@ if uploaded_file:
     mode = st.radio("طريقة التقييم", ["تلقائي", "يدوي"], horizontal=True)
 
     if mode == "تلقائي":
-        st.markdown('<div class="note-box">سيتم في التقييم التلقائي مراجعة أهم عناصر جودة البيانات بشكل آلي، مثل القيم الناقصة، وتكرار المعرفات، وصيغة أرقام الهاتف أو البطاقات، واتساق التوقيت بين البداية والنهاية، والنطاق المنطقي لبعض القيم الرقمية، مع التركيز على المشكلات الأساسية الأكثر شيوعًا.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="note-box">سيتم في التقييم التلقائي مراجعة أهم عناصر جودة البيانات بشكل آلي، مثل القيم المفقودة، وتكرار المعرفات، وصيغة أرقام الهاتف أو البطاقات، والنطاق المنطقي للقيم الرقمية، والتسلسل الزمني بين وقت البداية والنهاية، مع التركيز على المشكلات الأساسية الأكثر شيوعًا.</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="note-box">في التقييم اليدوي يمكنك تحديد قواعد الفحص بنفسك وفقًا للمعايير العامة، مثل الأعمدة الإلزامية، والقيم المسموحة، والتفرد، والنطاق، والنمط، والاتساق، وبذلك يصبح التقييم أكثر دقة وملاءمة لطبيعة الملف الذي تعمل عليه.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="note-box">في التقييم اليدوي يمكنك تحديد قواعد الفحص بنفسك وفقًا للمعايير العامة، مثل الأعمدة الإلزامية، والتفرد، والقيم المسموحة، والقيم المرجعية للدقة، والنطاق، والنمط، والتسلسل الزمني، والاتساق بين الحقول.</div>', unsafe_allow_html=True)
 
-        rules = st.session_state["rules_ui_final"]
+        rules = st.session_state["rules_final_edits"]
         left, right = st.columns(2)
 
         with left:
@@ -605,26 +622,20 @@ if uploaded_file:
 
         rules["format_col"] = st.selectbox("Format/Pattern - عمود النمط", [""] + cols, index=([""] + cols).index(rules["format_col"]) if rules["format_col"] in ([""] + cols) else 0)
         rules["regex_pattern"] = st.text_input("Format/Pattern - Regex", value=rules["regex_pattern"], placeholder=r"^\d{11}$")
-        st.session_state["rules_ui_final"] = rules
+        st.session_state["rules_final_edits"] = rules
 
     if st.button("🚀 تشغيل التقييم"):
-        auto_scores = auto_issues = None
-        manual_scores = manual_issues = None
-
         if mode == "تلقائي":
-            auto_scores, auto_issues = auto_assess(df)
-            merged = auto_scores
-            issues_df = pd.DataFrame(auto_issues)
+            scores, issues = auto_assess(df)
         else:
-            manual_scores, manual_issues = manual_assess(df, st.session_state["rules_ui_final"])
-            merged = manual_scores
-            issues_df = pd.DataFrame(manual_issues)
+            scores, issues = manual_assess(df, st.session_state["rules_final_edits"])
 
+        issues_df = pd.DataFrame(issues)
         if not issues_df.empty:
             issues_df = issues_df.drop_duplicates()
 
-        scores_df = scores_to_df(merged)
-        ov = overall_score(merged)
+        scores_df = scores_to_df(scores)
+        ov = overall_score(scores)
 
         results_tab, charts_tab = st.tabs(["📋 النتائج", "📈 الرسوم البيانية لجودة البيانات"])
 
@@ -638,12 +649,12 @@ if uploaded_file:
                 st.success("لم يتم اكتشاف مشكلات وفق القواعد الحالية.")
             else:
                 st.dataframe(issues_df, use_container_width=True)
-                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues.csv", "text/csv")
+                st.download_button("⬇️ تحميل تقرير المشكلات CSV", issues_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_issues_final.csv", "text/csv")
 
-            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores.csv", "text/csv")
+            st.download_button("⬇️ تحميل نسب المعايير CSV", scores_df.to_csv(index=False).encode("utf-8-sig"), "efb_dq_scores_final.csv", "text/csv")
 
             if mode == "يدوي":
-                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_ui_final"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules.json", "application/json")
+                st.download_button("⬇️ تحميل الإعدادات اليدوية JSON", json.dumps(st.session_state["rules_final_edits"], ensure_ascii=False, indent=2).encode("utf-8"), "efb_dq_rules_final.json", "application/json")
 
         with charts_tab:
             st.markdown('<div class="section-title">📈 الرسوم البيانية لجودة البيانات</div>', unsafe_allow_html=True)

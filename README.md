@@ -1,7 +1,8 @@
-# Egyptian Food Bank - Data Quality App UI Final
+# EFB Data Quality App - Final Edits
 Includes:
-- fixed general dimensions
-- auto mode
-- manual mode
-- hidden charts inside a separate tab
-- EFB styled UI
+- EFB style UI
+- Auto and Manual only
+- General dimensions always visible
+- Arabic issue messages
+- Preview summary (rows, columns, missing, duplicates, dtypes)
+- Charts inside separate tab
